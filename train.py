@@ -1,210 +1,212 @@
-"""
-Train and save both models for the VQC vs CNN project.
-
-Dataset:
-    scikit-learn Digits dataset, restricted to digits 0 and 1.
-
-Outputs:
-    models/cnn_model.keras
-    models/vqc_weights.npy
-    models/pca.joblib
-    models/scaler.joblib
-    models/metadata.json
-"""
-
-from pathlib import Path
+import os
 import json
-import numpy as np
 import joblib
-import pennylane as qml
-from pennylane import numpy as pnp
-
-from sklearn.datasets import load_digits
-from sklearn.decomposition import PCA
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-
+import numpy as np
+import streamlit as st
 import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
+from PIL import Image
+import pennylane as qml
 
 
-# ---------------------------------------------------------
-# SETTINGS
-# ---------------------------------------------------------
+# ============================================================
+# PAGE SETUP
+# ============================================================
 
-SEED = 42
-
-np.random.seed(SEED)
-tf.random.set_seed(SEED)
-
-ROOT = Path(__file__).resolve().parent
-MODEL_DIR = ROOT / "models"
-MODEL_DIR.mkdir(exist_ok=True)
-
-
-# ---------------------------------------------------------
-# 1. LOAD DATASET
-# ---------------------------------------------------------
-
-digits = load_digits()
-
-X = digits.images.astype("float32") / 16.0
-y = digits.target.astype("int64")
-
-# Keep only digits 0 and 1
-mask = (y == 0) | (y == 1)
-
-X = X[mask]
-y = y[mask]
-
-X_train, X_test, y_train, y_test = train_test_split(
-    X,
-    y,
-    test_size=0.20,
-    random_state=SEED,
-    stratify=y
+st.set_page_config(
+    page_title="VQC vs CNN",
+    page_icon="🤖",
+    layout="centered"
 )
 
-print("Training samples:", len(X_train))
-print("Testing samples :", len(X_test))
+st.title("🤖 VQC vs CNN")
+st.write(
+    "Compare a Classical CNN with a Variational Quantum Classifier."
+)
 
 
-# ---------------------------------------------------------
-# 2. CLASSICAL CNN
-# ---------------------------------------------------------
+# ============================================================
+# MODEL PATHS
+# ============================================================
 
-cnn = keras.Sequential([
-    layers.Input(shape=(8, 8, 1)),
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
+)
 
-    layers.Conv2D(
-        16,
-        (3, 3),
-        activation="relu",
-        padding="same"
-    ),
+MODELS_DIR = os.path.join(
+    BASE_DIR,
+    "models"
+)
 
-    layers.MaxPooling2D((2, 2)),
+CNN_PATH = os.path.join(
+    MODELS_DIR,
+    "cnn_model.keras"
+)
 
-    layers.Conv2D(
-        32,
-        (3, 3),
-        activation="relu",
-        padding="same"
-    ),
+PCA_PATH = os.path.join(
+    MODELS_DIR,
+    "pca.joblib"
+)
 
-    layers.Flatten(),
+SCALER_PATH = os.path.join(
+    MODELS_DIR,
+    "scaler.joblib"
+)
 
-    layers.Dense(
-        32,
-        activation="relu"
-    ),
+VQC_PATH = os.path.join(
+    MODELS_DIR,
+    "vqc_weights.npy"
+)
 
-    layers.Dropout(0.20),
+METADATA_PATH = os.path.join(
+    MODELS_DIR,
+    "metadata.json"
+)
 
-    layers.Dense(
-        1,
-        activation="sigmoid"
+
+# ============================================================
+# CHECK MODELS FOLDER
+# ============================================================
+
+if not os.path.isdir(MODELS_DIR):
+
+    st.error("❌ 'models' folder was not found.")
+
+    st.code(MODELS_DIR)
+
+    st.stop()
+
+
+# ============================================================
+# CHECK REQUIRED FILES
+# ============================================================
+
+required_files = {
+    "CNN model": CNN_PATH,
+    "PCA": PCA_PATH,
+    "Scaler": SCALER_PATH,
+    "VQC weights": VQC_PATH,
+    "Metadata": METADATA_PATH
+}
+
+missing_files = []
+
+for name, path in required_files.items():
+
+    if not os.path.isfile(path):
+
+        missing_files.append(
+            (name, path)
+        )
+
+
+if missing_files:
+
+    st.error(
+        "❌ Some model files are missing."
     )
-])
+
+    for name, path in missing_files:
+
+        st.write(
+            f"**{name}:**"
+        )
+
+        st.code(path)
+
+    st.stop()
 
 
-cnn.compile(
-    optimizer=keras.optimizers.Adam(
-        learning_rate=0.001
-    ),
-    loss="binary_crossentropy",
-    metrics=["accuracy"]
+# ============================================================
+# LOAD MODELS
+# ============================================================
+
+@st.cache_resource
+def load_models():
+
+    cnn = tf.keras.models.load_model(
+        CNN_PATH
+    )
+
+    pca = joblib.load(
+        PCA_PATH
+    )
+
+    scaler = joblib.load(
+        SCALER_PATH
+    )
+
+    vqc_weights = np.load(
+        VQC_PATH
+    )
+
+    with open(
+        METADATA_PATH,
+        "r",
+        encoding="utf-8"
+    ) as file:
+
+        metadata = json.load(file)
+
+    return (
+        cnn,
+        pca,
+        scaler,
+        vqc_weights,
+        metadata
+    )
+
+
+# ============================================================
+# LOAD ALL MODELS
+# ============================================================
+
+try:
+
+    (
+        cnn,
+        pca,
+        scaler,
+        vqc_weights,
+        metadata
+    ) = load_models()
+
+    st.success(
+        "✅ All models loaded successfully."
+    )
+
+except Exception as e:
+
+    st.error(
+        "❌ Error while loading models."
+    )
+
+    st.exception(e)
+
+    st.stop()
+
+
+# ============================================================
+# VQC SETUP
+# ============================================================
+
+N_QUBITS = int(
+    metadata.get(
+        "n_qubits",
+        4
+    )
+)
+
+N_LAYERS = int(
+    metadata.get(
+        "n_layers",
+        2
+    )
 )
 
 
-print("\nTraining CNN...")
-
-cnn.fit(
-    X_train[..., np.newaxis],
-    y_train,
-    validation_split=0.15,
-    epochs=12,
-    batch_size=32,
-    verbose=1
-)
-
-
-cnn_loss, cnn_acc = cnn.evaluate(
-    X_test[..., np.newaxis],
-    y_test,
-    verbose=0
-)
-
-print("\nCNN test accuracy:", cnn_acc)
-
-
-# Save CNN
-cnn.save(
-    MODEL_DIR / "cnn_model.keras"
-)
-
-
-# ---------------------------------------------------------
-# 3. PREPARE DATA FOR VQC
-# ---------------------------------------------------------
-
-X_train_flat = X_train.reshape(
-    len(X_train),
-    -1
-)
-
-X_test_flat = X_test.reshape(
-    len(X_test),
-    -1
-)
-
-
-# Reduce 64 pixels to 4 features
-pca = PCA(
-    n_components=4,
-    random_state=SEED
-)
-
-X_train_pca = pca.fit_transform(
-    X_train_flat
-)
-
-X_test_pca = pca.transform(
-    X_test_flat
-)
-
-
-# Standardize the four features
-scaler = StandardScaler()
-
-X_train_vqc = scaler.fit_transform(
-    X_train_pca
-)
-
-X_test_vqc = scaler.transform(
-    X_test_pca
-)
-
-
-# Save preprocessing objects
-joblib.dump(
-    pca,
-    MODEL_DIR / "pca.joblib"
-)
-
-joblib.dump(
-    scaler,
-    MODEL_DIR / "scaler.joblib"
-)
-
-
-# ---------------------------------------------------------
-# 4. VARIATIONAL QUANTUM CLASSIFIER
-# ---------------------------------------------------------
-
-N_QUBITS = 4
-N_LAYERS = 2
+# ============================================================
+# QUANTUM DEVICE
+# ============================================================
 
 dev = qml.device(
     "default.qubit",
@@ -212,242 +214,492 @@ dev = qml.device(
 )
 
 
+# ============================================================
+# VQC CIRCUIT
+# ============================================================
+
 @qml.qnode(
     dev,
     interface="autograd"
 )
-def circuit(x, weights):
+def vqc_circuit(
+    x,
+    weights
+):
 
+    # Same embedding used during training
     qml.AngleEmbedding(
         x,
         wires=range(N_QUBITS),
         rotation="Y"
     )
 
+    # Same variational layers used during training
     qml.StronglyEntanglingLayers(
         weights,
         wires=range(N_QUBITS)
     )
 
+    # Same measurement used during training
     return qml.expval(
         qml.PauliZ(0)
     )
 
 
-def vqc_probability(x, weights):
+# ============================================================
+# VQC PROBABILITY
+# ============================================================
 
-    result = circuit(
+def vqc_probability(
+    x,
+    weights
+):
+
+    result = vqc_circuit(
         x,
         weights
     )
 
-    return (result + 1.0) / 2.0
+    return (
+        result + 1.0
+    ) / 2.0
 
 
-def batch_loss(
-    weights,
-    X_batch,
-    y_batch
+# ============================================================
+# MODEL INFORMATION
+# ============================================================
+
+st.subheader(
+    "📦 Model Information"
+)
+
+col1, col2 = st.columns(2)
+
+
+with col1:
+
+    st.write("CNN: ✅ Loaded")
+    st.write("PCA: ✅ Loaded")
+    st.write("Scaler: ✅ Loaded")
+
+
+with col2:
+
+    st.write("VQC: ✅ Loaded")
+
+    st.write(
+        f"Qubits: **{N_QUBITS}**"
+    )
+
+    st.write(
+        f"Layers: **{N_LAYERS}**"
+    )
+
+
+# ============================================================
+# METADATA
+# ============================================================
+
+with st.expander(
+    "🔎 View Metadata"
 ):
 
-    predictions = pnp.stack([
-        vqc_probability(
-            x,
-            weights
-        )
-        for x in X_batch
-    ])
-
-    return pnp.mean(
-        (predictions - y_batch) ** 2
-    )
+    st.json(metadata)
 
 
-# ---------------------------------------------------------
-# INITIALIZE VQC WEIGHTS
-# ---------------------------------------------------------
+# ============================================================
+# IMAGE UPLOAD
+# ============================================================
 
-weight_shape = qml.StronglyEntanglingLayers.shape(
-    n_layers=N_LAYERS,
-    n_wires=N_QUBITS
+st.subheader(
+    "🖼️ Upload an Image"
 )
 
-weights = pnp.array(
-    0.05 * np.random.randn(
-        *weight_shape
-    ),
-    requires_grad=True
+uploaded_file = st.file_uploader(
+    "Upload a digit image",
+    type=[
+        "jpg",
+        "jpeg",
+        "png",
+        "jfif"
+    ]
 )
 
 
-optimizer = qml.AdamOptimizer(
-    stepsize=0.08
-)
+# ============================================================
+# PREDICTION
+# ============================================================
+
+if uploaded_file is not None:
+
+    try:
+
+        # ====================================================
+        # 1. OPEN IMAGE
+        # ====================================================
+
+        # The training dataset contains grayscale images.
+        image = Image.open(
+            uploaded_file
+        ).convert("L")
 
 
-X_vqc_pnp = pnp.array(
-    X_train_vqc,
-    requires_grad=False
-)
+        # ====================================================
+        # 2. DISPLAY IMAGE
+        # ====================================================
 
-y_vqc_pnp = pnp.array(
-    y_train,
-    requires_grad=False
-)
-
-
-# ---------------------------------------------------------
-# TRAIN VQC
-# ---------------------------------------------------------
-
-EPOCHS = 20
-BATCH_SIZE = 16
-
-print("\nTraining VQC...")
-
-
-for epoch in range(EPOCHS):
-
-    indices = np.random.permutation(
-        len(X_vqc_pnp)
-    )
-
-    for start in range(
-        0,
-        len(indices),
-        BATCH_SIZE
-    ):
-
-        batch_idx = indices[
-            start:start + BATCH_SIZE
-        ]
-
-        X_batch = X_vqc_pnp[
-            batch_idx
-        ]
-
-        y_batch = y_vqc_pnp[
-            batch_idx
-        ]
-
-        weights, cost = optimizer.step_and_cost(
-            lambda w:
-                batch_loss(
-                    w,
-                    X_batch,
-                    y_batch
-                ),
-            weights
-        )
-
-    if (epoch + 1) % 5 == 0:
-
-        print(
-            f"VQC epoch {epoch + 1}/{EPOCHS} "
-            f"- loss: {float(cost):.4f}"
+        st.image(
+            image,
+            caption="Uploaded Grayscale Image",
+            width=250
         )
 
 
-# ---------------------------------------------------------
-# 5. TEST VQC
-# ---------------------------------------------------------
+        # ====================================================
+        # 3. RESIZE TO 8 x 8
+        # ====================================================
 
-vqc_predictions = []
-
-for x in X_test_vqc:
-
-    probability = float(
-        vqc_probability(
-            x,
-            weights
+        image = image.resize(
+            (8, 8)
         )
-    )
-
-    prediction = (
-        1
-        if probability >= 0.5
-        else 0
-    )
-
-    vqc_predictions.append(
-        prediction
-    )
 
 
-vqc_acc = float(
-    np.mean(
-        np.array(vqc_predictions)
-        == y_test
-    )
+        # ====================================================
+        # 4. CONVERT TO NUMPY
+        # ====================================================
+
+        image_array = np.array(
+            image
+        ).astype(
+            "float32"
+        )
+
+
+        # ====================================================
+        # 5. NORMALIZE
+        # ====================================================
+
+        image_array = (
+            image_array / 255.0
+        )
+
+
+        # ====================================================
+        # 6. CNN INPUT
+        # ====================================================
+
+        cnn_input = np.expand_dims(
+            image_array,
+            axis=-1
+        )
+
+        cnn_input = np.expand_dims(
+            cnn_input,
+            axis=0
+        )
+
+
+        st.write(
+            "CNN input shape:"
+        )
+
+        st.code(
+            str(cnn_input.shape)
+        )
+
+
+        # ====================================================
+        # 7. CNN PREDICTION
+        # ====================================================
+
+        cnn_output = cnn.predict(
+            cnn_input,
+            verbose=0
+        )
+
+
+        cnn_probability = float(
+            cnn_output[0][0]
+        )
+
+
+        if cnn_probability >= 0.5:
+
+            cnn_class = 1
+
+            cnn_confidence = (
+                cnn_probability
+            )
+
+        else:
+
+            cnn_class = 0
+
+            cnn_confidence = (
+                1.0 - cnn_probability
+            )
+
+
+        # ====================================================
+        # 8. PREPARE IMAGE FOR VQC
+        # ====================================================
+
+        # Flatten 8x8 image
+        flat_image = image_array.reshape(
+            1,
+            -1
+        )
+
+
+        # ====================================================
+        # 9. PCA
+        # ====================================================
+
+        pca_features = pca.transform(
+            flat_image
+        )
+
+
+        # ====================================================
+        # 10. STANDARD SCALER
+        # ====================================================
+
+        vqc_input = scaler.transform(
+            pca_features
+        )
+
+
+        # ====================================================
+        # 11. VQC PREDICTION
+        # ====================================================
+
+        vqc_probability_value = float(
+            vqc_probability(
+                vqc_input[0],
+                vqc_weights
+            )
+        )
+
+
+        # ====================================================
+        # 12. VQC CLASS
+        # ====================================================
+
+        if vqc_probability_value >= 0.5:
+
+            vqc_class = 1
+
+            vqc_confidence = (
+                vqc_probability_value
+            )
+
+        else:
+
+            vqc_class = 0
+
+            vqc_confidence = (
+                1.0 -
+                vqc_probability_value
+            )
+
+
+        # ====================================================
+        # 13. DISPLAY CNN RESULT
+        # ====================================================
+
+        st.divider()
+
+        st.subheader(
+            "🧠 CNN Prediction"
+        )
+
+        cnn_col1, cnn_col2 = st.columns(2)
+
+
+        with cnn_col1:
+
+            st.metric(
+                "Predicted Digit",
+                str(cnn_class)
+            )
+
+
+        with cnn_col2:
+
+            st.metric(
+                "Confidence",
+                f"{cnn_confidence * 100:.2f}%"
+            )
+
+
+        # ====================================================
+        # 14. DISPLAY VQC RESULT
+        # ====================================================
+
+        st.subheader(
+            "⚛️ VQC Prediction"
+        )
+
+        vqc_col1, vqc_col2 = st.columns(2)
+
+
+        with vqc_col1:
+
+            st.metric(
+                "Predicted Digit",
+                str(vqc_class)
+            )
+
+
+        with vqc_col2:
+
+            st.metric(
+                "Confidence",
+                f"{vqc_confidence * 100:.2f}%"
+            )
+
+
+        # ====================================================
+        # 15. COMPARISON
+        # ====================================================
+
+        st.divider()
+
+        st.subheader(
+            "📊 CNN vs VQC"
+        )
+
+
+        comparison_col1, comparison_col2 = st.columns(2)
+
+
+        with comparison_col1:
+
+            st.write(
+                "### 🧠 CNN"
+            )
+
+            st.write(
+                f"Prediction: **{cnn_class}**"
+            )
+
+            st.write(
+                f"Confidence: "
+                f"**{cnn_confidence * 100:.2f}%**"
+            )
+
+
+        with comparison_col2:
+
+            st.write(
+                "### ⚛️ VQC"
+            )
+
+            st.write(
+                f"Prediction: **{vqc_class}**"
+            )
+
+            st.write(
+                f"Confidence: "
+                f"**{vqc_confidence * 100:.2f}%**"
+            )
+
+
+        # ====================================================
+        # 16. AGREEMENT
+        # ====================================================
+
+        st.subheader(
+            "🔍 Prediction Comparison"
+        )
+
+
+        if cnn_class == vqc_class:
+
+            st.success(
+                f"Both models predicted digit **{cnn_class}**."
+            )
+
+        else:
+
+            st.warning(
+                "The CNN and VQC produced different predictions."
+            )
+
+
+        # ====================================================
+        # 17. VQC DETAILS
+        # ====================================================
+
+        with st.expander(
+            "⚛️ View VQC Processing Details"
+        ):
+
+            st.write(
+                "Original image:"
+            )
+
+            st.write(
+                "8 × 8 = 64 pixels"
+            )
+
+            st.write(
+                "After PCA:"
+            )
+
+            st.write(
+                f"{pca_features.shape[1]} features"
+            )
+
+            st.write(
+                "After StandardScaler:"
+            )
+
+            st.write(
+                f"{vqc_input.shape[1]} features"
+            )
+
+            st.write(
+                "Number of qubits:"
+            )
+
+            st.write(
+                N_QUBITS
+            )
+
+            st.write(
+                "Number of VQC layers:"
+            )
+
+            st.write(
+                N_LAYERS
+            )
+
+            st.write(
+                "VQC probability:"
+            )
+
+            st.write(
+                f"{vqc_probability_value:.6f}"
+            )
+
+
+    except Exception as e:
+
+        st.error(
+            "❌ Error while processing the image."
+        )
+
+        st.exception(e)
+
+
+# ============================================================
+# FOOTER
+# ============================================================
+
+st.divider()
+
+st.caption(
+    "VQC vs CNN — Hybrid Quantum-Classical Machine Learning"
 )
-
-
-print(
-    "\nVQC test accuracy:",
-    vqc_acc
-)
-
-
-# Save VQC weights
-np.save(
-    MODEL_DIR / "vqc_weights.npy",
-    np.array(weights)
-)
-
-
-# ---------------------------------------------------------
-# 6. SAVE PROJECT INFORMATION
-# ---------------------------------------------------------
-
-metadata = {
-
-    "classes": [
-        0,
-        1
-    ],
-
-    "image_size": [
-        8,
-        8
-    ],
-
-    "n_qubits": N_QUBITS,
-
-    "n_layers": N_LAYERS,
-
-    "cnn_test_accuracy":
-        float(cnn_acc),
-
-    "vqc_test_accuracy":
-        float(vqc_acc),
-
-    "dataset":
-        "Scikit-learn Digits dataset (digits 0 and 1)"
-}
-
-
-with open(
-    MODEL_DIR / "metadata.json",
-    "w",
-    encoding="utf-8"
-) as f:
-
-    json.dump(
-        metadata,
-        f,
-        indent=2
-    )
-
-
-print("\n--------------------------------")
-print("Training completed successfully!")
-print("--------------------------------")
-
-print("\nGenerated files:")
-
-for file in MODEL_DIR.iterdir():
-
-    print(
-        " -",
-        file.name
-    )
+  
