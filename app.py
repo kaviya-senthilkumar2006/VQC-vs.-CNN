@@ -4,10 +4,11 @@ import joblib
 import numpy as np
 import streamlit as st
 import tensorflow as tf
+from PIL import Image
 
 
 # ============================================================
-# PAGE CONFIGURATION
+# PAGE SETUP
 # ============================================================
 
 st.set_page_config(
@@ -16,69 +17,58 @@ st.set_page_config(
     layout="centered"
 )
 
+st.title("🤖 VQC vs CNN")
+st.write("Compare Classical CNN and Variational Quantum Classifier models.")
+
 
 # ============================================================
-# PATHS
+# MODEL PATHS
 # ============================================================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 
-
 CNN_PATH = os.path.join(MODELS_DIR, "cnn_model.keras")
-METADATA_PATH = os.path.join(MODELS_DIR, "metadata.json")
 PCA_PATH = os.path.join(MODELS_DIR, "pca.joblib")
 SCALER_PATH = os.path.join(MODELS_DIR, "scaler.joblib")
-VQC_WEIGHTS_PATH = os.path.join(MODELS_DIR, "vqc_weights.npy")
+VQC_PATH = os.path.join(MODELS_DIR, "vqc_weights.npy")
+METADATA_PATH = os.path.join(MODELS_DIR, "metadata.json")
 
 
 # ============================================================
-# TITLE
-# ============================================================
-
-st.title("🤖 VQC vs CNN")
-st.write(
-    "Compare predictions from a Classical CNN and "
-    "a Variational Quantum Classifier (VQC)."
-)
-
-
-# ============================================================
-# CHECK MODEL DIRECTORY
+# CHECK MODELS FOLDER
 # ============================================================
 
 if not os.path.isdir(MODELS_DIR):
-    st.error(
-        f"❌ Models directory not found.\n\n"
-        f"Expected location:\n`{MODELS_DIR}`"
-    )
+    st.error("❌ The 'models' folder was not found.")
+    st.write("Expected:", MODELS_DIR)
     st.stop()
 
 
 # ============================================================
-# CHECK REQUIRED FILES
+# CHECK FILES
 # ============================================================
 
-required_files = {
-    "CNN model": CNN_PATH,
-    "Metadata": METADATA_PATH,
-    "PCA": PCA_PATH,
-    "Scaler": SCALER_PATH,
-    "VQC weights": VQC_WEIGHTS_PATH
-}
+required_files = [
+    CNN_PATH,
+    PCA_PATH,
+    SCALER_PATH,
+    VQC_PATH,
+    METADATA_PATH
+]
 
-missing_files = []
+missing = []
 
-for name, path in required_files.items():
-    if not os.path.isfile(path):
-        missing_files.append(f"{name}: `{path}`")
+for file_path in required_files:
+    if not os.path.isfile(file_path):
+        missing.append(file_path)
 
 
-if missing_files:
-    st.error("❌ Some required model files are missing:")
+if missing:
+    st.error("❌ The following files are missing:")
 
-    for file in missing_files:
-        st.write(file)
+    for file_path in missing:
+        st.write(file_path)
 
     st.stop()
 
@@ -90,21 +80,16 @@ if missing_files:
 @st.cache_resource
 def load_models():
 
-    # CNN
     cnn = tf.keras.models.load_model(CNN_PATH)
 
-    # PCA
     pca = joblib.load(PCA_PATH)
 
-    # Scaler
     scaler = joblib.load(SCALER_PATH)
 
-    # VQC weights
-    vqc_weights = np.load(VQC_WEIGHTS_PATH)
+    vqc_weights = np.load(VQC_PATH)
 
-    # Metadata
-    with open(METADATA_PATH, "r") as f:
-        metadata = json.load(f)
+    with open(METADATA_PATH, "r") as file:
+        metadata = json.load(file)
 
     return cnn, pca, scaler, vqc_weights, metadata
 
@@ -117,19 +102,19 @@ try:
 
     cnn, pca, scaler, vqc_weights, metadata = load_models()
 
-    st.success("✅ Models loaded successfully!")
+    st.success("✅ All models and supporting files loaded successfully.")
 
 except Exception as e:
 
     st.error("❌ Error while loading the models.")
 
-    st.code(str(e))
+    st.exception(e)
 
     st.stop()
 
 
 # ============================================================
-# DISPLAY MODEL INFORMATION
+# MODEL INFORMATION
 # ============================================================
 
 st.subheader("📦 Model Information")
@@ -137,21 +122,20 @@ st.subheader("📦 Model Information")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.write("**CNN:** Loaded ✅")
-    st.write("**PCA:** Loaded ✅")
-    st.write("**Scaler:** Loaded ✅")
+    st.write("CNN: ✅ Loaded")
+    st.write("PCA: ✅ Loaded")
+    st.write("Scaler: ✅ Loaded")
 
 with col2:
-    st.write("**VQC weights:** Loaded ✅")
-    st.write("**Metadata:** Loaded ✅")
+    st.write("VQC weights: ✅ Loaded")
+    st.write("Metadata: ✅ Loaded")
 
 
 # ============================================================
-# DISPLAY METADATA
+# METADATA
 # ============================================================
 
 with st.expander("🔎 View Metadata"):
-
     st.json(metadata)
 
 
@@ -159,34 +143,32 @@ with st.expander("🔎 View Metadata"):
 # IMAGE UPLOAD
 # ============================================================
 
-st.subheader("🖼️ Test Image")
+st.subheader("🖼️ Upload an Image")
 
 uploaded_file = st.file_uploader(
-    "Upload an image",
+    "Choose an image",
     type=["jpg", "jpeg", "png", "jfif"]
 )
 
 
 # ============================================================
-# IMAGE PREDICTION
+# PREDICTION
 # ============================================================
 
 if uploaded_file is not None:
 
-    st.image(
-        uploaded_file,
-        caption="Uploaded Image",
-        use_container_width=True
-    )
-
     try:
-
-        from PIL import Image
 
         image = Image.open(uploaded_file).convert("RGB")
 
+        st.image(
+            image,
+            caption="Uploaded Image",
+            use_container_width=True
+        )
+
         # ----------------------------------------------------
-        # Determine CNN input size
+        # Get CNN input size
         # ----------------------------------------------------
 
         input_shape = cnn.input_shape
@@ -198,7 +180,7 @@ if uploaded_file is not None:
         width = input_shape[2]
 
         # ----------------------------------------------------
-        # Resize image
+        # Resize
         # ----------------------------------------------------
 
         image = image.resize((width, height))
@@ -234,22 +216,19 @@ if uploaded_file is not None:
         )
 
         # ----------------------------------------------------
-        # Handle different output formats
+        # Determine prediction
         # ----------------------------------------------------
 
         if prediction.shape[-1] == 1:
 
             probability = float(prediction[0][0])
 
-            predicted_class = (
-                1 if probability >= 0.5 else 0
-            )
-
-            confidence = (
-                probability
-                if predicted_class == 1
-                else 1 - probability
-            )
+            if probability >= 0.5:
+                predicted_class = 1
+                confidence = probability
+            else:
+                predicted_class = 0
+                confidence = 1.0 - probability
 
         else:
 
@@ -278,20 +257,26 @@ if uploaded_file is not None:
             elif "labels" in metadata:
                 class_names = metadata["labels"]
 
+        # ----------------------------------------------------
+        # Prediction name
+        # ----------------------------------------------------
+
+        if class_names is not None:
+
+            if predicted_class < len(class_names):
+                predicted_name = class_names[predicted_class]
+            else:
+                predicted_name = str(predicted_class)
+
+        else:
+
+            predicted_name = str(predicted_class)
 
         # ----------------------------------------------------
         # Display result
         # ----------------------------------------------------
 
         st.subheader("🎯 CNN Prediction")
-
-        if class_names and predicted_class < len(class_names):
-
-            predicted_name = class_names[predicted_class]
-
-        else:
-
-            predicted_name = str(predicted_class)
 
         st.success(
             f"Prediction: **{predicted_name}**"
@@ -305,6 +290,12 @@ if uploaded_file is not None:
             min(max(confidence, 0.0), 1.0)
         )
 
+    except Exception as e:
+
+        st.error("❌ Error while processing the image.")
+
+        st.exception(e)
+
 
 # ============================================================
 # VQC INFORMATION
@@ -315,12 +306,7 @@ st.divider()
 st.subheader("⚛️ VQC Information")
 
 st.write(
-    f"VQC weights loaded successfully."
-)
-
-st.write(
-    f"Number of VQC parameters: "
-    f"**{vqc_weights.size}**"
+    f"VQC weights loaded: **{vqc_weights.size} parameters**"
 )
 
 
@@ -333,5 +319,3 @@ st.divider()
 st.caption(
     "VQC vs CNN — Hybrid Quantum-Classical Machine Learning"
 )
-
-
