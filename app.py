@@ -40,35 +40,42 @@ METADATA_PATH = os.path.join(MODELS_DIR, "metadata.json")
 # ============================================================
 
 if not os.path.isdir(MODELS_DIR):
-    st.error("❌ The 'models' folder was not found.")
-    st.write("Expected:", MODELS_DIR)
+
+    st.error("❌ 'models' folder was not found.")
+
+    st.write("Expected folder:")
+    st.code(MODELS_DIR)
+
     st.stop()
 
 
 # ============================================================
-# CHECK FILES
+# CHECK REQUIRED FILES
 # ============================================================
 
-required_files = [
-    CNN_PATH,
-    PCA_PATH,
-    SCALER_PATH,
-    VQC_PATH,
-    METADATA_PATH
-]
+required_files = {
+    "CNN model": CNN_PATH,
+    "PCA": PCA_PATH,
+    "Scaler": SCALER_PATH,
+    "VQC weights": VQC_PATH,
+    "Metadata": METADATA_PATH
+}
 
-missing = []
+missing_files = []
 
-for file_path in required_files:
-    if not os.path.isfile(file_path):
-        missing.append(file_path)
+for name, path in required_files.items():
+
+    if not os.path.isfile(path):
+        missing_files.append((name, path))
 
 
-if missing:
-    st.error("❌ The following files are missing:")
+if missing_files:
 
-    for file_path in missing:
-        st.write(file_path)
+    st.error("❌ Some model files are missing.")
+
+    for name, path in missing_files:
+        st.write(f"**{name}:**")
+        st.code(path)
 
     st.stop()
 
@@ -80,14 +87,19 @@ if missing:
 @st.cache_resource
 def load_models():
 
+    # CNN
     cnn = tf.keras.models.load_model(CNN_PATH)
 
+    # PCA
     pca = joblib.load(PCA_PATH)
 
+    # Scaler
     scaler = joblib.load(SCALER_PATH)
 
+    # VQC weights
     vqc_weights = np.load(VQC_PATH)
 
+    # Metadata
     with open(METADATA_PATH, "r") as file:
         metadata = json.load(file)
 
@@ -95,14 +107,14 @@ def load_models():
 
 
 # ============================================================
-# LOAD
+# LOAD ALL FILES
 # ============================================================
 
 try:
 
     cnn, pca, scaler, vqc_weights, metadata = load_models()
 
-    st.success("✅ All models and supporting files loaded successfully.")
+    st.success("✅ All model files loaded successfully.")
 
 except Exception as e:
 
@@ -122,13 +134,32 @@ st.subheader("📦 Model Information")
 col1, col2 = st.columns(2)
 
 with col1:
+
     st.write("CNN: ✅ Loaded")
     st.write("PCA: ✅ Loaded")
     st.write("Scaler: ✅ Loaded")
 
+
 with col2:
+
     st.write("VQC weights: ✅ Loaded")
     st.write("Metadata: ✅ Loaded")
+
+
+# ============================================================
+# SHOW CNN INPUT SHAPE
+# ============================================================
+
+st.subheader("🧠 CNN Input Information")
+
+input_shape = cnn.input_shape
+
+if isinstance(input_shape, list):
+    input_shape = input_shape[0]
+
+st.write("Model input shape:")
+
+st.code(str(input_shape))
 
 
 # ============================================================
@@ -136,6 +167,7 @@ with col2:
 # ============================================================
 
 with st.expander("🔎 View Metadata"):
+
     st.json(metadata)
 
 
@@ -159,16 +191,30 @@ if uploaded_file is not None:
 
     try:
 
-        image = Image.open(uploaded_file).convert("RGB")
+        # ----------------------------------------------------
+        # OPEN IMAGE
+        # ----------------------------------------------------
+
+        # IMPORTANT:
+        # The CNN expects 1 channel.
+        # Therefore we convert the image to grayscale.
+
+        image = Image.open(uploaded_file).convert("L")
+
+
+        # ----------------------------------------------------
+        # DISPLAY IMAGE
+        # ----------------------------------------------------
 
         st.image(
             image,
-            caption="Uploaded Image",
+            caption="Uploaded Grayscale Image",
             use_container_width=True
         )
 
+
         # ----------------------------------------------------
-        # Get CNN input size
+        # GET MODEL INPUT SIZE
         # ----------------------------------------------------
 
         input_shape = cnn.input_shape
@@ -176,38 +222,79 @@ if uploaded_file is not None:
         if isinstance(input_shape, list):
             input_shape = input_shape[0]
 
+
         height = input_shape[1]
         width = input_shape[2]
 
-        # ----------------------------------------------------
-        # Resize
-        # ----------------------------------------------------
-
-        image = image.resize((width, height))
 
         # ----------------------------------------------------
-        # Convert to numpy
+        # RESIZE IMAGE
         # ----------------------------------------------------
 
-        image_array = np.array(image).astype("float32")
+        image = image.resize(
+            (width, height)
+        )
+
 
         # ----------------------------------------------------
-        # Normalize
+        # CONVERT TO NUMPY
+        # ----------------------------------------------------
+
+        image_array = np.array(
+            image
+        ).astype("float32")
+
+
+        # ----------------------------------------------------
+        # NORMALIZE
         # ----------------------------------------------------
 
         image_array = image_array / 255.0
 
+
         # ----------------------------------------------------
-        # Add batch dimension
+        # ADD CHANNEL DIMENSION
         # ----------------------------------------------------
+
+        # Before:
+        # (8, 8)
+
+        # After:
+        # (8, 8, 1)
+
+        image_array = np.expand_dims(
+            image_array,
+            axis=-1
+        )
+
+
+        # ----------------------------------------------------
+        # ADD BATCH DIMENSION
+        # ----------------------------------------------------
+
+        # Before:
+        # (8, 8, 1)
+
+        # After:
+        # (1, 8, 8, 1)
 
         image_array = np.expand_dims(
             image_array,
             axis=0
         )
 
+
         # ----------------------------------------------------
-        # CNN prediction
+        # SHOW FINAL INPUT SHAPE
+        # ----------------------------------------------------
+
+        st.write("Image input shape sent to CNN:")
+
+        st.code(str(image_array.shape))
+
+
+        # ----------------------------------------------------
+        # CNN PREDICTION
         # ----------------------------------------------------
 
         prediction = cnn.predict(
@@ -215,20 +302,27 @@ if uploaded_file is not None:
             verbose=0
         )
 
+
         # ----------------------------------------------------
-        # Determine prediction
+        # DETERMINE PREDICTION
         # ----------------------------------------------------
 
         if prediction.shape[-1] == 1:
 
-            probability = float(prediction[0][0])
+            probability = float(
+                prediction[0][0]
+            )
 
             if probability >= 0.5:
+
                 predicted_class = 1
                 confidence = probability
+
             else:
+
                 predicted_class = 0
                 confidence = 1.0 - probability
+
 
         else:
 
@@ -240,40 +334,56 @@ if uploaded_file is not None:
                 np.max(prediction[0])
             )
 
+
         # ----------------------------------------------------
-        # Get class names
+        # GET CLASS NAMES
         # ----------------------------------------------------
 
         class_names = None
 
+
         if isinstance(metadata, dict):
 
             if "class_names" in metadata:
+
                 class_names = metadata["class_names"]
 
             elif "classes" in metadata:
+
                 class_names = metadata["classes"]
 
             elif "labels" in metadata:
+
                 class_names = metadata["labels"]
 
+
         # ----------------------------------------------------
-        # Prediction name
+        # GET PREDICTION NAME
         # ----------------------------------------------------
 
         if class_names is not None:
 
             if predicted_class < len(class_names):
-                predicted_name = class_names[predicted_class]
+
+                predicted_name = class_names[
+                    predicted_class
+                ]
+
             else:
-                predicted_name = str(predicted_class)
+
+                predicted_name = str(
+                    predicted_class
+                )
 
         else:
 
-            predicted_name = str(predicted_class)
+            predicted_name = str(
+                predicted_class
+            )
+
 
         # ----------------------------------------------------
-        # Display result
+        # DISPLAY RESULT
         # ----------------------------------------------------
 
         st.subheader("🎯 CNN Prediction")
@@ -283,16 +393,35 @@ if uploaded_file is not None:
         )
 
         st.write(
+            f"Class number: **{predicted_class}**"
+        )
+
+        st.write(
             f"Confidence: **{confidence * 100:.2f}%**"
         )
 
         st.progress(
-            min(max(confidence, 0.0), 1.0)
+            min(
+                max(confidence, 0.0),
+                1.0
+            )
         )
+
+
+        # ----------------------------------------------------
+        # RAW PREDICTION
+        # ----------------------------------------------------
+
+        with st.expander("🔬 View Raw CNN Output"):
+
+            st.write(prediction)
+
 
     except Exception as e:
 
-        st.error("❌ Error while processing the image.")
+        st.error(
+            "❌ Error while processing the image."
+        )
 
         st.exception(e)
 
@@ -306,8 +435,34 @@ st.divider()
 st.subheader("⚛️ VQC Information")
 
 st.write(
-    f"VQC weights loaded: **{vqc_weights.size} parameters**"
+    f"VQC weights loaded: "
+    f"**{vqc_weights.size} parameters**"
 )
+
+
+# ============================================================
+# PCA / SCALER INFORMATION
+# ============================================================
+
+st.subheader("📊 Supporting Components")
+
+col1, col2 = st.columns(2)
+
+with col1:
+
+    st.write("PCA: ✅ Loaded")
+
+    try:
+        st.write(
+            f"Components: **{pca.n_components_}**"
+        )
+    except Exception:
+        st.write("PCA information available")
+
+
+with col2:
+
+    st.write("Scaler: ✅ Loaded")
 
 
 # ============================================================
@@ -319,3 +474,4 @@ st.divider()
 st.caption(
     "VQC vs CNN — Hybrid Quantum-Classical Machine Learning"
 )
+
