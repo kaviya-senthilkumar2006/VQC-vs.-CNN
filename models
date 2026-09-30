@@ -1,5 +1,0 @@
-cnn_model.keras
-metadata.json
-pca.joblib
-scaler.joblib
-vqc_weights.npy
