@@ -1,0 +1,15 @@
+{
+  "classes": [
+    0,
+    1
+  ],
+  "image_size": [
+    8,
+    8
+  ],
+  "n_qubits": 4,
+  "n_layers": 2,
+  "cnn_test_accuracy": 1.0,
+  "vqc_test_accuracy": 0.9166666666666666,
+  "dataset": "Scikit-learn Digits dataset (digits 0 and 1)"
+}
